@@ -7,6 +7,7 @@ Create in c:\hattrick 2 txt files, skill.txt and stars.txt
 Contents of skill.txt should be something like this:
 
 Andreescu 6.3/7 4/4 5/5 1/7 1/3
+
 Hordiievskyi 6.3/7 3/3 7/7 3/3 3/3
 
 Those should be your players, followed by the skills as showned in the player list. This is the order: Def PM Wing Pass Scoring
