@@ -1,5 +1,5 @@
 # =================================================================
-# HATTRICK YOUTH ACADEMY OPTIMIZER (HARDWARE POSITION BARRIERS)
+# HATTRICK YOUTH ACADEMY OPTIMIZER (STABLE FLUID ENGINE v4.2)
 # =================================================================
 $skillFile = Join-Path $PSScriptRoot "skill.txt"
 $starFile  = Join-Path $PSScriptRoot "stars.txt"
@@ -10,59 +10,77 @@ if (-not (Test-Path $skillFile) -or -not (Test-Path $starFile)) {
 }
 
 # 1. Read skill.txt
-$playersData = [System.Collections.ArrayList]::new()
+$playersData = [System.Collections.Generic.List[Object]]::new()
 Get-Content -Path $skillFile -Encoding UTF8 | Where-Object { $_.Trim() -ne '' } | ForEach-Object {
     $c = $_.Split("`t ") | Where-Object { $_ -ne '' }
     if ($c.Count -ge 6) {
-        $playersData.Add(@{ 
+        $playersData.Add([PSCustomObject]@{ 
             Name    = ($c | Select-Object -Index 0)
             DEF     = ($c | Select-Object -Index 1)
             PM      = ($c | Select-Object -Index 2)
             Wing    = ($c | Select-Object -Index 3)
             Pass    = ($c | Select-Object -Index 4)
             Scoring = ($c | Select-Object -Index 5)
-        }) | Out-Null
+        })
     }
 }
 
-# 2. Read stars.txt
-$matchStars = [System.Collections.ArrayList]::new()
+# 2. Read stars.txt into a Lookup HashTable (Fixed Splitting Error)
+$matchStarsLookup = @{}
 Get-Content -Path $starFile -Encoding UTF8 | Where-Object { $_.Trim() -ne '' } | ForEach-Object {
     $c = $_.Split("`t ") | Where-Object { $_ -ne '' }
     if ($c.Count -ge 6) {
-        $matchStars.Add(@{ 
-            Name    = ($c | Select-Object -Index 0)
-            CD      = [double]($c | Select-Object -Index 1)
-            WB      = [double]($c | Select-Object -Index 2)
-            IM      = [double]($c | Select-Object -Index 3)
-            Winger  = [double]($c | Select-Object -Index 4)
-            Forward = [double]($c | Select-Object -Index 5)
-        }) | Out-Null
+        try {
+            $name = ($c | Select-Object -Index 0)
+            $matchStarsLookup[$name] = @{ 
+                CD      = [double]($c | Select-Object -Index 1)
+                WB      = [double]($c | Select-Object -Index 2)
+                IM      = [double]($c | Select-Object -Index 3)
+                Winger  = [double]($c | Select-Object -Index 4)
+                Forward = [double]($c | Select-Object -Index 5)
+            }
+        } catch {
+            Write-Host "Warning: Non-numeric star rating found for player '$name'." -ForegroundColor Yellow
+        }
     }
 }
 
-# 3. Range converter function
+# 3. Dynamic Range Converter (Completely open limits for green bars)
 function Get-HattrickRange ($rawVal) {
-    if ([string]::IsNullOrWhiteSpace($rawVal) -or $rawVal -eq '?') { return @{ min = 1.0; max = 7.75 } }
+    if ([string]::IsNullOrWhiteSpace($rawVal) -or $rawVal -eq '?') { return @{ min = 1.0; max = 7.99 } }
     $text = $rawVal.ToString().Trim().Replace(',', '.')
+    
     if ($text -like "*/*") {
         $parts = $text.Split('/')
-        $v1 = [double]($parts | Select-Object -First 1)
-        $v2 = [double]($parts | Select-Object -Last 1)
-        if ($v1 -eq 1.0 -and $v2 -gt 1.0) { return @{ min = 1.0; max = $v2 + 0.75 } }
-        return @{ min = $v1; max = $v1 + 0.75 }
+        if ([double]::TryParse($parts[0], [ref]0.0) -and [double]::TryParse($parts[-1], [ref]0.0)) {
+            $v1 = [double]$parts[0]
+            $v2 = [double]$parts[-1]
+            
+            # If 5/5, it means it is AT LEAST 5.00, but can grow up to 5.99 in background training.
+            if ($v1 -eq $v2 -and $v1 -gt 1.0) {
+                return @{ min = $v1; max = $v1 + 0.99 }
+            }
+            if ($v1 -eq 1.0 -and $v2 -gt 1.0) { 
+                return @{ min = 1.0; max = $v2 + 0.75 } 
+            }
+            return @{ min = $v1; max = $v1 + 0.75 }
+        }
     }
-    $fix = [double]$text
-    return @{ min = $fix; max = $fix + 0.75 }
+    
+    if ([double]::TryParse($text, [ref]0.0)) {
+        $fix = [double]$text
+        return @{ min = $fix; max = $fix + 0.75 }
+    }
+    return @{ min = 1.0; max = 7.99 }
 }
 
-# Strict error calculation function
+# Calibrated Error Function
 function Get-StrictError ($d, $pm, $w, $ps, $s, $m) {
-    $simCD  = $d * 0.74 + $pm * 0.18 + $ps * 0.08
-    $simWB  = $d * 0.56 + $w * 0.24 + $pm * 0.15 + $ps * 0.05
-    $simIM  = $pm * 0.73 + $d * 0.14 + $ps * 0.13
-    $simWng = $w * 0.56 + $pm * 0.24 + $ps * 0.15 + $d * 0.05
-    $simFwd = $s * 0.73 + $ps * 0.22 + $w * 0.05
+    $simCD  = $d * 0.75 + $pm * 0.18 + $ps * 0.07
+    $simWB  = $d * 0.58 + $w * 0.22 + $pm * 0.15 + $ps * 0.05
+    $simIM  = $pm * 0.75 + $d * 0.12 + $ps * 0.13
+    $simWng = $w * 0.58 + $pm * 0.22 + $ps * 0.15 + $d * 0.05
+    $simFwd = $s * 0.76 + $ps * 0.19 + $w * 0.05
     
     $sum = 0.0
     $count = 0
@@ -76,12 +94,16 @@ function Get-StrictError ($d, $pm, $w, $ps, $s, $m) {
     return $sum / $count
 }
 
-# 4. Processing and Optimization
-$results = @()
+# 4. Processing and Smart Grid Search
+$results = [System.Collections.Generic.List[Object]]::new()
+$testFactors = @(0.0, 0.33, 0.66, 1.0) 
+$microSteps = @(0.10, -0.10, 0.02, -0.02) # Restored your original exact steps
+$skillsArray = @('DEF','PM','Wing','Pass','Scoring')
+
 foreach ($p in $playersData) {
     $name = $p.Name
-    $m = $matchStars | Where-Object { $_.Name -eq $name }
-    if (-not $m) { continue }
+    if (-not $matchStarsLookup.ContainsKey($name)) { continue }
+    $m = $matchStarsLookup[$name]
     
     $rDef = Get-HattrickRange $p.DEF
     $rPm  = Get-HattrickRange $p.PM
@@ -89,16 +111,15 @@ foreach ($p in $playersData) {
     $rPas = Get-HattrickRange $p.Pass
     $rSco = Get-HattrickRange $p.Scoring
     
-    # Initial Grid Search
     $bestErr = 999.0
     $cDef = $rDef.min; $cPm = $rPm.min; $cWng = $rWng.min; $cPas = $rPas.min; $cSco = $rSco.min
-    $testFactors = @(0.2, 0.5, 0.8)
 
     foreach ($fDef in $testFactors) {
         foreach ($fPm in $testFactors) {
             foreach ($fWng in $testFactors) {
                 foreach ($fPas in $testFactors) {
                     foreach ($fSco in $testFactors) {
+                        
                         $tDef = $rDef.min + ($rDef.max - $rDef.min) * $fDef
                         $tPm  = $rPm.min  + ($rPm.max - $rPm.min)  * $fPm
                         $tWng = $rWng.min + ($rWng.max - $rWng.min) * $fWng
@@ -116,13 +137,13 @@ foreach ($p in $playersData) {
         }
     }
     
-    # Fine Micro-optimization
+    # Fine Micro-optimization Loop
     $currErr = $bestErr
-    $microSteps = @(0.10, -0.10, 0.02, -0.02)
     for ($step = 0; $step -lt 60; $step++) {
         $moved = $false
         foreach ($delta in $microSteps) {
-            foreach ($var in @('DEF','PM','Wing','Pass','Scoring')) {
+            foreach ($var in $skillsArray) {
+                
                 $tDef = $cDef; $tPm = $cPm; $tWng = $cWng; $tPas = $cPas; $tSco = $cSco
                 switch ($var) {
                     'DEF'     { $tDef = [Math]::Max($rDef.min, [Math]::Min($rDef.max, $cDef + $delta)) }
@@ -141,37 +162,30 @@ foreach ($p in $playersData) {
         if (-not $moved) { break }
     }
     
-    # ABSOLUTE MATHEMATICAL BARRIERS (Without checking text from skill.txt)
+    # HARDWARE POSITIONAL BARRIERS 
     $finalDef = "{0:N2}" -f $cDef -replace '\.', ','
     $finalPm  = "{0:N2}" -f $cPm  -replace '\.', ','
     $finalWng = "{0:N2}" -f $cWng -replace '\.', ','
     $finalPas = "{0:N2}" -f $cPas -replace '\.', ','
     $finalSco = "{0:N2}" -f $cSco -replace '\.', ','
 
-    # 1. If player did not play in a defensive position -> DEF becomes "?"
     if ($m.CD -eq 0 -and $m.WB -eq 0 -and $m.IM -eq 0) { $finalDef = "?" }
-    
-    # 2. If player did not play in a position that uses Playmaking -> PM becomes "?"
     if ($m.IM -eq 0 -and $m.Winger -eq 0 -and $m.WB -eq 0) { $finalPm  = "?" }
-    
-    # 3. If player has no match as a forward -> Scoring becomes "?" mandatory
     if ($m.Forward -eq 0) { $finalSco = "?" }
-    
-    # 4. Wing becomes "?" if player did not play on the flanks (Winger or WB)
     if ($m.Winger -eq 0 -and $m.WB -eq 0) { $finalWng = "?" }
-    
-    # 5. Passing (If player did not play anywhere at all)
     if ($m.CD -eq 0 -and $m.WB -eq 0 -and $m.IM -eq 0 -and $m.Winger -eq 0 -and $m.Forward -eq 0) { $finalPas = "?" }
 
-    $results += [PSCustomObject]@{
+    $results.Add([PSCustomObject]@{
         Player  = $name
         DEF     = $finalDef
         PM      = $finalPm
         Wing    = $finalWng
         Pass    = $finalPas
         Scoring = $finalSco
-    }
+        AvgErr  = "{0:P1}" -f $currErr
+    })
 }
 
-Write-Host "`n=== OPTIMIZED FINAL RESULTS (HARDWARE BARRIERS ENGINE) ===" -ForegroundColor Cyan
+# 5. Output Results
+Write-Host "`n=== OPTIMIZED FINAL RESULTS (STABLE FLUID ENGINE) ===" -ForegroundColor Cyan
 $results | Format-Table -AutoSize
