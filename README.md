@@ -18,6 +18,7 @@ Notice on my guys, at def, i put 6.3. That is my estimation of training on them,
 Contents of stars.txt should be something like this:
 
 Andreescu 5.5 5.5 4.5 5.5 4.5
+
 Hordiievskyi 6 6 0 5.5 4
 
 Those are the maximum stars they got on a position. The position are CD WB IM W F. If the player did not play a position, write 0.
